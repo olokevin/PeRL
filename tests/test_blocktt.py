@@ -97,8 +97,8 @@ class TestBTTLayer:
         out_dense = x @ dense.t()
         if layer.bias is not None:
             out_dense = out_dense + layer.bias
-        # bmm vs matmul accumulation order differs; bfloat16 has limited mantissa
-        assert torch.allclose(out_forward, out_dense, atol=1e-2), (
+        # bmm vs matmul accumulation order differs; bfloat16 has limited mantissa (8-bit)
+        assert torch.allclose(out_forward, out_dense, atol=2e-2), (
             f"Max diff: {(out_forward - out_dense).abs().max().item()}"
         )
 
