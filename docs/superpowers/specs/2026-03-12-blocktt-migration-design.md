@@ -29,7 +29,9 @@ Port of `btt_layer.py` from `lora-without-regret`, restructured as a HF PEFT-com
 
 #### BTTLayer
 
-Neural network module replacing `nn.Linear`. Core parameters:
+Neural network module replacing `nn.Linear`. Uses dual inheritance: extends both `nn.Module` and HF PEFT's `BaseTunerLayer` (following SliceFine's pattern) to get adapter lifecycle methods (`merged_adapters`, `active_adapters`, `_disable_adapters`, `check_adapters_to_merge()`).
+
+Core parameters:
 
 - `btt_r: Parameter` — right core, shape `(n, b, m * rank)`
 - `btt_l: Parameter` — left core, shape `(m, rank * n, a)`
@@ -45,7 +47,7 @@ x → reshape(n, B, b) → bmm(btt_r) → reshape(m, B, n*r) → bmm(btt_l) → 
 
 **`materialize_dense_weight()`:** Reconstructs full dense weight via `einsum("mnra,mnrb->mnab", l, r)` then reshapes to `(out_features, in_features)`.
 
-**Initialization:** SVD-based from the original dense weight of the replaced `nn.Linear` layer. Singular values distributed according to `s_merged_to` strategy.
+**Initialization:** SVD-based from the original dense weight of the replaced `nn.Linear` layer. Singular values distributed according to `s_merged_to` strategy. The `BTTLayer` is constructed and initialized from the original `nn.Linear`'s weight BEFORE calling `_replace_module()`, ensuring the full weight is available for SVD decomposition. This is safe under DeepSpeed ZeRO-2 (used by PeRL's scripts) since ZeRO-2 partitions optimizer states, not parameters.
 
 #### BlockTTConfig
 
@@ -57,9 +59,16 @@ class BlockTTConfig(PeftConfig):
     decomp_mode: str = "input_one_block"    # or "output_one_block"
     train_position: str = "small"           # "small", "large", or "both"
     s_merged_to: str = "frozen"             # "frozen", "trainable", "output", "input", "split", "keep"
-    blocktt_rank: str = "full"              # "full" or positive integer
+    blocktt_rank: str = "full"              # "full" or positive integer (parsed in apply_blocktt)
     train_bias: bool = True
     target_modules: list[str] | None = None
+
+    def __post_init__(self):
+        self.peft_type = "BLOCKTT"
+        self.target_modules = (
+            set(self.target_modules) if isinstance(self.target_modules, list)
+            else self.target_modules
+        )
 ```
 
 Registered as peft type `"BLOCKTT"` via `register_blocktt_method()`.
@@ -68,22 +77,23 @@ Registered as peft type `"BLOCKTT"` via `register_blocktt_method()`.
 
 Custom tuner class (extends HF PEFT's `BaseTuner`):
 
-- **`_create_and_replace()`**: For each target module, replaces `nn.Linear` with `BTTLayer`. Initializes from the original weight via SVD decomposition. Configures trainability based on `train_position`.
+**Class attribute:** `prefix = "btt_"` — matches BTT parameter names (`btt_r`, `btt_l`, `btt_s`). This is critical: TRL's `_move_model_to_vllm()` skips any parameter whose name contains the prefix, so BTT core parameters are automatically excluded from vLLM sync while the materialized `.weight` (no `btt_` in name) is sent through.
+
+- **`_create_and_replace()`**: For each target module, constructs a `BTTLayer` initialized from the original `nn.Linear`'s weight via SVD, then calls `_replace_module()` to swap it in. Configures trainability based on `train_position`.
 
 - **`merge_adapter()`**: For each `BTTLayer`:
   1. Call `materialize_dense_weight()` to reconstruct the full dense matrix
   2. Store result as `module.weight` (`nn.Parameter`, `requires_grad=False`)
-  3. Also expose `module.bias` if present
-  4. Hide BTT core parameters from `named_parameters()` iteration
+  3. Track merged state via `self.merged_adapters` (from `BaseTunerLayer`)
 
-  After merge, TRL's `_move_model_to_vllm()` sees standard `{module_name}.weight` parameters with shapes matching vLLM's expectations.
+  Note: BTT core parameters (`btt_r`, `btt_l`, `btt_s`) do NOT need to be hidden — they remain in `named_parameters()` but TRL's prefix-based skip filter (`if self.model.prefix in name: continue`) automatically excludes them. The materialized `.weight` and existing `.bias` have no `btt_` prefix, so they pass through to vLLM correctly.
 
 - **`unmerge_adapter()`**: Reverse of merge:
-  1. Remove the materialized `module.weight`
-  2. Restore BTT cores as the active parameters
+  1. Delete the materialized `module.weight` parameter
+  2. Clear merged state tracking
   3. Re-enable gradients on trainable cores
 
-- **`enable_adapter_layers()` / `disable_adapter_layers()`**: Standard PEFT hooks for controlling trainability.
+- **`enable_adapter_layers()` / `disable_adapter_layers()`**: Delegates to `BaseTunerLayer` infrastructure for adapter lifecycle control.
 
 #### register_blocktt_method()
 
@@ -102,16 +112,23 @@ register_blocktt_method()
 def apply_blocktt(model, args):
     from .blocktt import BlockTTConfig
     from peft import get_peft_model
+
+    # Parse blocktt_rank: "full" stays as string, otherwise convert to int
+    raw_rank = getattr(args.peft, "blocktt_rank", "full")
+    blocktt_rank = raw_rank if raw_rank == "full" else int(raw_rank)
+
     config = BlockTTConfig(
         decomp_mode=getattr(args.peft, "decomp_mode", "input_one_block"),
         train_position=getattr(args.peft, "train_position", "small"),
         s_merged_to=getattr(args.peft, "s_merged_to", "frozen"),
-        blocktt_rank=getattr(args.peft, "blocktt_rank", "full"),
+        blocktt_rank=blocktt_rank,
         train_bias=getattr(args.peft, "train_bias", True),
         target_modules=args.peft.target_modules,
     )
     peft_model = get_peft_model(model, config)
     peft_model.print_trainable_parameters()
+    if sum(p.numel() for p in peft_model.parameters() if p.requires_grad) == 0:
+        raise ValueError("BlockTT: no trainable parameters found. Check train_position and target_modules.")
     return None, peft_model
 
 PEFT_TYPE_TO_FUNCTION_MAPPING["blocktt"] = apply_blocktt
@@ -176,6 +193,12 @@ Training step N:
   13. Optimizer updates trainable cores
 ```
 
+## Compatibility Notes
+
+- **Gradient checkpointing**: Works transparently — BTTLayer replaces `nn.Linear` at the module level, so transformer-block-level checkpointing recomputes the BTT forward pass as expected.
+- **Checkpoint saving/loading**: `register_blocktt_method()` runs at import time in `adapter.py`, so PEFT's `save_pretrained()`/`load_pretrained()` will find the correct config/tuner. The `prefix = "btt_"` ensures PEFT identifies adapter parameters correctly.
+- **DeepSpeed ZeRO-2**: Compatible. Parameters are not partitioned under ZeRO-2, so the full weight is available during SVD initialization. ZeRO-3 is NOT supported (would require parameter gathering).
+
 ## Scope Exclusions
 
 - **No Muon optimizer support** — uses standard AdamW via PeRL's trainer
@@ -187,7 +210,7 @@ Training step N:
 
 1. **Parameter count test**: Add `"blocktt"` to `perl/test.py` — verify trainable parameter counting works
 2. **Smoke test**: Run `dapo_blocktt.sh` with `max_steps=4` — verify training loop completes without errors
-3. **Merge/unmerge round-trip**: Verify that `merge_adapter()` → `unmerge_adapter()` produces identical forward pass outputs (no weight corruption)
+3. **Merge/unmerge round-trip**: Verify that `merge_adapter()` → `unmerge_adapter()` produces identical forward pass outputs (use `torch.allclose` with `atol=1e-5` for float32, `atol=1e-3` for bfloat16, since merge uses einsum while forward uses bmm)
 
 ## File Summary
 
