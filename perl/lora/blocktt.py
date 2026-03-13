@@ -6,13 +6,13 @@ HuggingFace PEFT-compatible custom tuner (following the SliceFine pattern).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional, Union
+from typing import List, Optional, Union
 
 import torch
 import torch.nn as nn
 
 from peft.config import PeftConfig
-from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer, check_adapters_to_merge
+from peft.tuners.tuners_utils import BaseTuner, BaseTunerLayer
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +293,11 @@ class BTTLayer(nn.Module, BaseTunerLayer):
     # ---- Forward --------------------------------------------------------
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self._disable_adapters or self.merged_adapters:
+            # Use materialized dense weight (set by merge_adapter)
+            out = torch.nn.functional.linear(x, self.weight, self.bias)
+            return out
+
         if x.shape[-1] != self.in_features:
             raise ValueError(
                 f"BTTLayer expected last dim {self.in_features}, got {x.shape[-1]}"
@@ -476,6 +481,8 @@ class BlockTTModel(BaseTuner):
         for module in self.model.modules():
             if not isinstance(module, BTTLayer):
                 continue
+            if module.merged_adapters:
+                continue  # already merged
             dense = module.materialize_dense_weight()
             module.register_parameter(
                 "weight", nn.Parameter(dense, requires_grad=False),
