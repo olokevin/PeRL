@@ -31,6 +31,10 @@ Port of `btt_layer.py` from `lora-without-regret`, restructured as a HF PEFT-com
 
 Neural network module replacing `nn.Linear`. Uses dual inheritance: extends both `nn.Module` and HF PEFT's `BaseTunerLayer` (following SliceFine's pattern) to get adapter lifecycle methods (`merged_adapters`, `active_adapters`, `_disable_adapters`, `check_adapters_to_merge()`).
 
+**Class attributes:**
+- `adapter_layer_names = ("btt_r", "btt_l")` — tells PEFT which attributes are adapter-specific (note: these are raw `nn.Parameter` objects, not `nn.ModuleDict` like SliceFine; this is fine since `BaseTunerLayer` only uses these names for device movement and adapter identification)
+- `other_param_names = ("btt_s",)` — frozen metadata parameters
+
 Core parameters:
 
 - `btt_r: Parameter` — right core, shape `(n, b, m * rank)`
@@ -59,7 +63,7 @@ class BlockTTConfig(PeftConfig):
     decomp_mode: str = "input_one_block"    # or "output_one_block"
     train_position: str = "small"           # "small", "large", or "both"
     s_merged_to: str = "frozen"             # "frozen", "trainable", "output", "input", "split", "keep"
-    blocktt_rank: str = "full"              # "full" or positive integer (parsed in apply_blocktt)
+    blocktt_rank: Union[str, int] = "full"   # "full" or positive integer (parsed in apply_blocktt)
     train_bias: bool = True
     target_modules: list[str] | None = None
 
@@ -88,9 +92,11 @@ Custom tuner class (extends HF PEFT's `BaseTuner`):
 
   Note: BTT core parameters (`btt_r`, `btt_l`, `btt_s`) do NOT need to be hidden — they remain in `named_parameters()` but TRL's prefix-based skip filter (`if self.model.prefix in name: continue`) automatically excludes them. The materialized `.weight` and existing `.bias` have no `btt_` prefix, so they pass through to vLLM correctly.
 
+  Implementation detail: The materialized weight is registered via `module.register_parameter("weight", nn.Parameter(dense, requires_grad=False))` so it appears in `named_parameters()` and `state_dict()`. Checkpointing should only occur in unmerged state to avoid saving redundant dense weights.
+
 - **`unmerge_adapter()`**: Reverse of merge:
-  1. Delete the materialized `module.weight` parameter
-  2. Clear merged state tracking
+  1. Remove the materialized weight via `delattr(module, "weight")` (safe since it was dynamically added during merge)
+  2. Clear merged state tracking via `self.merged_adapters.discard(adapter_name)`
   3. Re-enable gradients on trainable cores
 
 - **`enable_adapter_layers()` / `disable_adapter_layers()`**: Delegates to `BaseTunerLayer` infrastructure for adapter lifecycle control.
