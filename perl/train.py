@@ -94,10 +94,10 @@ def train(
 
     # 3. configure lora
     if args.peft.use_peft:
-        logger.info(f"Detected PEFT configuration, configuring lora")
-        from perl.lora.adapter import apply_lora
-        optimizer, model = apply_lora(model, args)
-        logger.info(f"Lora configured successfully")
+        logger.info(f"Detected PEFT configuration, applying {args.peft.type}")
+        from perl.lora.adapter import apply_peft
+        optimizer, model = apply_peft(model, args)
+        logger.info(f"PEFT ({args.peft.type}) configured successfully")
 
     # 4.Training configuration
     training_args = GRPOConfig(
