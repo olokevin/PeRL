@@ -28,6 +28,12 @@ class PeftConfig:
     target_modules: List[str] = field(
         default_factory=lambda: ["q_proj", "v_proj", "k_proj", "o_proj", "up_proj", "down_proj"]
     )
+    # BlockTT-specific fields (only used when type="blocktt")
+    decomp_mode: str = "input_one_block"
+    train_position: str = "small"
+    s_merged_to: str = "frozen"
+    blocktt_rank: str = "full"
+    train_bias: bool = True
 
 
 @dataclass
