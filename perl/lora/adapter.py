@@ -6,6 +6,9 @@
 from .slicefine import register_slicefine_method
 register_slicefine_method() # register slicefine method to peft
 
+from .blocktt import register_blocktt_method
+register_blocktt_method()
+
 def apply_lora(model, args):
     from peft import LoraConfig, get_peft_model
     config = LoraConfig(
@@ -188,6 +191,28 @@ def apply_rslora(model, args):
     )
     return None, get_peft_model(model, config)
 
+def apply_blocktt(model, args):
+    from .blocktt import BlockTTConfig
+    from peft import get_peft_model
+
+    raw_rank = getattr(args.peft, "blocktt_rank", "full")
+    blocktt_rank = raw_rank if raw_rank == "full" else int(raw_rank)
+
+    config = BlockTTConfig(
+        task_type=args.peft.task_type,
+        decomp_mode=getattr(args.peft, "decomp_mode", "input_one_block"),
+        train_position=getattr(args.peft, "train_position", "small"),
+        s_merged_to=getattr(args.peft, "s_merged_to", "frozen"),
+        blocktt_rank=blocktt_rank,
+        train_bias=getattr(args.peft, "train_bias", True),
+        target_modules=args.peft.target_modules,
+    )
+    peft_model = get_peft_model(model, config)
+    peft_model.print_trainable_parameters()
+    if sum(p.numel() for p in peft_model.parameters() if p.requires_grad) == 0:
+        raise ValueError("BlockTT: no trainable parameters found. Check train_position and target_modules.")
+    return None, peft_model
+
 # ------------------------------ mapping function to peft type ------------------------------
 
 PEFT_TYPE_TO_FUNCTION_MAPPING = {
@@ -205,6 +230,7 @@ PEFT_TYPE_TO_FUNCTION_MAPPING = {
     "miss": apply_miss,
     "pissa": apply_pissa,
     "hra": apply_hra,
+    "blocktt": apply_blocktt,
 }
 
 # ------------------------------ dispatch function to peft type ------------------------------
