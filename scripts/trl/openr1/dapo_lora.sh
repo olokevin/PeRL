@@ -1,11 +1,11 @@
 unset WANDB_DISABLED
-OUTPUT_DIR=outputs/grpo_lora_qwen2_5_3b_$(date +%Y%m%d_%H%M%S)
-# OUTPUT_DIR=outputs/debug
+# OUTPUT_DIR=outputs/grpo_lora_qwen2_5_3b_$(date +%Y%m%d_%H%M%S)
+OUTPUT_DIR=outputs/debug
 LOG_FILE=${OUTPUT_DIR}/output.log
 
 mkdir -p ${OUTPUT_DIR}
 
-CUDA_VISIBLE_DEVICES=4,5,6,7 ACCELERATE_LOG_LEVEL=info \
+CUDA_VISIBLE_DEVICES=0,1,2,3 ACCELERATE_LOG_LEVEL=info \
     accelerate launch \
     --main_process_port 29501 \
     --config_file scripts/trl/accelerate/ds_zero2_4gpu.yaml \
@@ -27,14 +27,14 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 ACCELERATE_LOG_LEVEL=info \
     --config.training.output_dir "${OUTPUT_DIR}" \
     --config.training.run_name "${OUTPUT_DIR}" \
     --config.training.remove_unused_columns false \
-    --config.training.gradient_accumulation_steps 8 \
     --config.training.num_train_epochs 1 \
     --config.training.max_completion_length 16384 \
-    --config.training.num_generations 8 \
     --config.training.warmup_ratio 0.0 \
     --config.training.max_prompt_length 512 \
     --config.training.logging_steps 1 \
-    --config.training.per_device_train_batch_size 4 \
+    --config.training.gradient_accumulation_steps 32 \
+    --config.training.per_device_train_batch_size 1 \
+    --config.training.num_generations 8 \
     --config.training.save_strategy "steps" \
     --config.training.save_steps 64 \
     --config.training.max_steps 1024 \
@@ -53,4 +53,4 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 ACCELERATE_LOG_LEVEL=info \
     --config.logging.wandb_project "grpo-full-qwen3-4b" \
     --config.dataset.dataset_name_or_path "open-r1/DAPO-Math-17k-Processed" \
     --config.dataset.example_numbers 1000000000 \
-    &> ${LOG_FILE}
+    # &> ${LOG_FILE}
