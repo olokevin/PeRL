@@ -26,12 +26,14 @@ def format_reward_func(completions, **kwargs):
             completion = "<think>" + completion
 
             if random.random() < 0.1:  # 1% 的概率将生成输出写入文件
-                # 创建生成输出目录（如果不存在）
-                os.makedirs("completion_samples", exist_ok=True)
-                log_file = os.path.join("completion_samples", "completion_samples.txt")
-                with open(log_file, "a") as f:
-                    f.write(f"\n\n==============\n")
-                    f.write(completion)  # 写入生成的输出
+                from perl.utils.logging import is_main_process
+                if is_main_process():
+                    # 创建生成输出目录（如果不存在）
+                    os.makedirs("completion_samples", exist_ok=True)
+                    log_file = os.path.join("completion_samples", "completion_samples.txt")
+                    with open(log_file, "a") as f:
+                        f.write(f"\n\n==============\n")
+                        f.write(completion)  # 写入生成的输出
 
             # 定义正则表达式模式，用于匹配 <think> 和 <answer> 标签
             regex = r"^<think>([^<]*(?:<(?!/?think>)[^<]*)*)<\/think>\n<answer>([\s\S]*?)<\/answer>$"
@@ -97,14 +99,16 @@ def equation_reward_func(completions, target, nums, **kwargs):
 
                 # 10% 的概率将成功的样本写入文件
                 if random.random() < 0.10:
-                    # 创建生成输出目录（如果不存在）
-                    os.makedirs("completion_samples", exist_ok=True)
-                    log_file = os.path.join(
-                        "completion_samples", "success_completion_samples.txt"
-                    )
-                    with open(log_file, "a") as f:
-                        f.write(f"\n\n==============\n")
-                        f.write(completion)  # 写入生成的输出
+                    from perl.utils.logging import is_main_process
+                    if is_main_process():
+                        # 创建生成输出目录（如果不存在）
+                        os.makedirs("completion_samples", exist_ok=True)
+                        log_file = os.path.join(
+                            "completion_samples", "success_completion_samples.txt"
+                        )
+                        with open(log_file, "a") as f:
+                            f.write(f"\n\n==============\n")
+                            f.write(completion)  # 写入生成的输出
             else:
                 rewards.append(0.0)  # 如果不正确，奖励为 0
         except Exception:

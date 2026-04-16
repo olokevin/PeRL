@@ -261,7 +261,9 @@ class SliceFineModel(BaseTuner):
                 elif "slicefine_A_layers" in name or "slicefine_B_layers" in name:
                     param.requires_grad = False
                     frozen_count += 1
-        print(f"[SliceFine] Safety Check: {trainable_count} params set to trainable, {frozen_count} params frozen.")
+        from perl.utils.logging import is_main_process
+        if is_main_process():
+            print(f"[SliceFine] Safety Check: {trainable_count} params set to trainable, {frozen_count} params frozen.")
 
     def merge_adapter(self, adapter_names: Optional[List[str]] = None) -> None:
         for module in self.model.modules():

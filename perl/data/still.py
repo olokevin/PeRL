@@ -57,12 +57,16 @@ def accuracy_reward(completions: list[list[dict[str, str]]], solution: list[str]
                 finally:
                     signal.alarm(0)  # Cancel the alarm
             except (Exception, TimeoutError) as e:
-                print(f"verify failed: {e}, completion: {content}, answer: {answer_parsed}, gold: {gold_parsed}")
+                from perl.utils.logging import is_main_process
+                if is_main_process():
+                    print(f"verify failed: {e}, completion: {content}, answer: {answer_parsed}, gold: {gold_parsed}")
                 reward = 0.0  # Return 0 instead of None to avoid NaN
         else:
             # If the gold solution is not parseable, assign 0 reward to avoid NaN
             reward = 0.0
-            print(f"Failed to parse gold solution: {sol}")
+            from perl.utils.logging import is_main_process
+            if is_main_process():
+                print(f"Failed to parse gold solution: {sol}")
         rewards.append(reward)
 
     return rewards

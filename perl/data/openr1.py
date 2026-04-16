@@ -43,8 +43,9 @@ def format_reward(completions, **kwargs):
     matches = [re.search(pattern, content) for content in completion_contents]
     
     # output if mismatch (truncated)
+    from perl.utils.logging import is_main_process
     for content, match in zip(completion_contents, matches, strict=True):
-        if not match:
+        if not match and is_main_process():
             truncated = content[:200] + "..." if len(content) > 200 else content
             print(f"Mismatch: {truncated}")
             print("-" * 100)

@@ -48,6 +48,9 @@ def fuzzy_jobs(
                 config=vars(args.training),
             )
             logger.info(f"Wandb initialized successfully")
+    else:
+        # Disable reporting on non-main processes to prevent duplicate wandb runs
+        args.training.report_to = []
 
     return args
 
@@ -55,7 +58,9 @@ def train(
     config: TrainConfig = None
 ):
     # 0. parse args and prepare logger
-    print(config)
+    from perl.utils.logging import is_main_process
+    if is_main_process():
+        print(config)
     args = fuzzy_jobs(config)
 
     # 1. load tokenizer and dataset

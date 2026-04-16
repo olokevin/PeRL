@@ -154,11 +154,14 @@ def apply_slicefine(model, args):
         target_modules=args.peft.target_modules,
         bias="all" if getattr(args.peft, "bias", False) else "none"
     )
-    print(f"[SliceFine] Applying SliceFine with rank={config.r}, modules={config.target_modules}")
-    
+    from perl.utils.logging import is_main_process
+    if is_main_process():
+        print(f"[SliceFine] Applying SliceFine with rank={config.r}, modules={config.target_modules}")
+
     peft_model = get_peft_model(model, config)
-    
-    peft_model.print_trainable_parameters()
+
+    if is_main_process():
+        peft_model.print_trainable_parameters()
     
     trainable_params = [p for p in peft_model.parameters() if p.requires_grad]
     if len(trainable_params) == 0:
@@ -208,7 +211,9 @@ def apply_blocktt(model, args):
         target_modules=args.peft.target_modules,
     )
     peft_model = get_peft_model(model, config)
-    peft_model.print_trainable_parameters()
+    from perl.utils.logging import is_main_process
+    if is_main_process():
+        peft_model.print_trainable_parameters()
     if sum(p.numel() for p in peft_model.parameters() if p.requires_grad) == 0:
         raise ValueError("BlockTT: no trainable parameters found. Check train_position and target_modules.")
     return None, peft_model

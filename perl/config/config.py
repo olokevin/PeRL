@@ -52,6 +52,8 @@ class TrainingConfig:
     logging_steps: int = 1
     save_strategy: str = "steps"
     save_steps: int = 128
+    save_total_limit: int = 1  # keep only the latest checkpoint directory
+    save_only_model: bool = False  # keep optimizer/scheduler/RNG states for resume
     max_steps: int = 1024
     use_vllm: bool = True  # (1) full-ft w/ vllm (2) others do not use vllm and rollout w/ model.generate instead.
     # Mika Update: all vllm
