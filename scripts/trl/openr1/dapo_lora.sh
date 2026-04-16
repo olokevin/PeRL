@@ -17,6 +17,7 @@ PEFT_TYPE="${PEFT_TYPE:-blocktt}" # blocktt lora full
 LR="${LR:-1e-4}"
 TBZ="${TBZ:-128}"
 MAX_COMPLETION_LENGTH="${MAX_COMPLETION_LENGTH:-16384}"
+VLLM_GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.4}"
 
 lora_r=16
 DECOMP_MODE=output_one_block
@@ -60,9 +61,9 @@ CUDA_VISIBLE_DEVICES=${DEVICE} ACCELERATE_LOG_LEVEL=info \
     --config.training.gradient_accumulation_steps $TBZ \
     --config.training.per_device_train_batch_size 1 \
     --config.training.num_generations 8 \
-    --config.training.learning_rate 1e-4 \
+    --config.training.learning_rate ${LR} \
     --config.training.run_name "${RUN_NAME}" \
-    --config.training.vllm_gpu_memory_utilization 0.3 \
+    --config.training.vllm_gpu_memory_utilization ${VLLM_GPU_MEMORY_UTILIZATION} \
     --config.training.max_completion_length $MAX_COMPLETION_LENGTH \
     --config.common.seed 42 \
     --config.common.debug false \
